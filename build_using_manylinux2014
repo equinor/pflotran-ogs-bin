@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# This script assumes that it's being ran inside of a
+# quay.io/pypa/manylinux2014_x86_64 OCI image.
+#
+# To run manually:
+# podman run --rm -it -v$PWD:$PWD:z -w$PWD quay.io/pypa/manylinux2014_x86_64 ./build_using_manylinux2014
+set -ex
+
+petsc_rev="v3.20.6"
+pflotran_ogs_version="1.8"
+pflotran_ogs_rev="sv11"
+
+petsc_url="https://gitlab.com/petsc/petsc.git"
+pflotran_ogs_url="https://bitbucket.org/opengosim/pflotran_ogs_${pflotran_ogs_version}.git"
+
+out="$PWD/result"
+tar="$PWD/pflotran_ogs-${pflotran_ogs_version}-${pflotran_ogs_rev}-$(date +%FT%T%z).tar.xz"
+
+# --------------------------------------
+# Clone
+# --------------------------------------
+git clone --depth=1 --branch="${petsc_rev}" -- "${petsc_url}" /tmp/petsc
+git clone --depth=1 --branch="${pflotran_ogs_rev}" -- "${pflotran_ogs_url}" /tmp/pflotran_ogs
+
+# --------------------------------------
+# Prepare environment
+# --------------------------------------
+
+# When running interactively, enter bash on error
+if tty -s
+then
+    echo "INFO: Enabling bash shell on error"
+    function on_err {
+        echo "!!! ERROR DURING BUILD !!!" >&2
+        bash
+    }
+    trap on_err ERR
+fi
+
+# Install additional dependencies
+yum install -y devtoolset-10-make lapack-devel
+
+# Add Python to path
+export PATH=/opt/python/cp38-cp38/bin:$PATH
+
+# --------------------------------------
+# Build petsc
+# --------------------------------------
+cd /tmp/petsc
+
+export PETSC_DIR=$PWD
+export PETSC_ARCH=gnu-c-opt
+
+./configure                                  \
+    --CFLAGS="-O3"                           \
+    --CXXFLAGS="-O3"                         \
+    --FFLAGS="-O3"                           \
+    --LDFLAGS="-Wl,-rpath,\\\$ORIGIN/../lib" \
+    --MAKEFLAGS="-j$(nproc)"                 \
+    --download-openmpi=yes                   \
+    --download-hdf5=yes                      \
+    --with-hdf5-fortran-bindings=yes         \
+    --use-fblaslapack=yes                    \
+    --prefix=$out
+
+make all
+make install
+
+# --------------------------------------
+# Build PFLOTRAN-OGS
+# --------------------------------------
+cd /tmp/pflotran_ogs/src/pflotran
+
+make UPDATE_PROVENANCE=0 pflotran
+patchelf --set-rpath "\$ORIGIN/../lib" pflotran
+install -D pflotran $out/bin/pflotran
+
+# --------------------------------------
+# Bundle result
+# --------------------------------------
+libs=(
+    /usr/lib64/libgfortran.so.5
+    /usr/lib64/libgfortran.so.5.0.0
+    /usr/lib64/libquadmath.so.0
+    /usr/lib64/libquadmath.so.0.0.0
+    /usr/lib64/libblas.so.3
+    /usr/lib64/liblapack.so.3
+)
+
+# Copy dependencies to $out/lib and patch them
+for lib in ${libs[@]}
+do
+    name=$(basename $lib)
+    install -D $lib $out/lib/$name
+    patchelf --set-rpath "\$ORIGIN" $out/lib/$name
+done
+
+# Build
+tar --create --xz --file=$tar "-C$out" .
