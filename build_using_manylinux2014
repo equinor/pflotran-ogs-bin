@@ -14,7 +14,7 @@ petsc_url="https://gitlab.com/petsc/petsc.git"
 pflotran_ogs_url="https://bitbucket.org/opengosim/pflotran_ogs_${pflotran_ogs_version}.git"
 
 out="$PWD/result"
-tar="$PWD/pflotran_ogs-${pflotran_ogs_version}-${pflotran_ogs_rev}-$(date +%FT%T%z).tar.xz"
+tar="$PWD/pflotran_ogs-${pflotran_ogs_version}-${pflotran_ogs_rev}.tar.xz"
 
 # --------------------------------------
 # Clone
