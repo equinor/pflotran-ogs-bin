@@ -8,19 +8,19 @@ set -ex
 
 petsc_rev="v3.20.6"
 pflotran_ogs_version="1.8"
-pflotran_ogs_rev="sv11"
+pflotran_ogs_rev="11"
 
 petsc_url="https://gitlab.com/petsc/petsc.git"
 pflotran_ogs_url="https://bitbucket.org/opengosim/pflotran_ogs_${pflotran_ogs_version}.git"
 
 out="$PWD/result"
-tar="$PWD/pflotran_ogs-${pflotran_ogs_version}-${pflotran_ogs_rev}.tar.xz"
+tar="$PWD/pflotran_ogs-${pflotran_ogs_version}.${pflotran_ogs_rev}-x86_64v3-rhel7-linux-gnu.tar.xz"
 
 # --------------------------------------
 # Clone
 # --------------------------------------
 git clone --depth=1 --branch="${petsc_rev}" -- "${petsc_url}" /tmp/petsc
-git clone --depth=1 --branch="${pflotran_ogs_rev}" -- "${pflotran_ogs_url}" /tmp/pflotran_ogs
+git clone --depth=1 --branch="sv${pflotran_ogs_rev}" -- "${pflotran_ogs_url}" /tmp/pflotran_ogs
 
 # --------------------------------------
 # Prepare environment
@@ -37,8 +37,12 @@ then
     trap on_err ERR
 fi
 
+# Remove output if previously generated
+rm -rf $out
+rm -f $tar
+
 # Install additional dependencies
-yum install -y devtoolset-10-make lapack-devel
+yum install -y devtoolset-10-make flex
 
 # Add Python to path
 export PATH=/opt/python/cp38-cp38/bin:$PATH
@@ -57,10 +61,12 @@ export PETSC_ARCH=gnu-c-opt
     --FFLAGS="-O3"                           \
     --LDFLAGS="-Wl,-rpath,\\\$ORIGIN/../lib" \
     --MAKEFLAGS="-j$(nproc)"                 \
-    --download-openmpi=yes                   \
+    --download-fblaslapack=yes               \
     --download-hdf5=yes                      \
+    --download-hypre=yes                     \
+    --download-openmpi=yes                   \
+    --download-ptscotch=yes                  \
     --with-hdf5-fortran-bindings=yes         \
-    --use-fblaslapack=yes                    \
     --prefix=$out
 
 make all
@@ -83,16 +89,53 @@ libs=(
     /usr/lib64/libgfortran.so.5.0.0
     /usr/lib64/libquadmath.so.0
     /usr/lib64/libquadmath.so.0.0.0
-    /usr/lib64/libblas.so.3
-    /usr/lib64/liblapack.so.3
+    /usr/lib64/libz.so.1
+    /usr/lib64/libz.so.1.2.7
 )
 
+# Delete unrelated files
+rm -r $out/include
+
+rm $out/lib/*.a
+rm $out/lib/*.la
+rm $out/lib/*.mod
+rm $out/lib/libhdf5.settings
+rm -r $out/lib/openmpi
+rm -r $out/lib/petsc
+rm -r $out/lib/pkgconfig
+rm -r $out/lib/pmix
+
+rm $out/bin/*.pl
+rm $out/bin/gif2h5
+rm $out/bin/h5*
+rm $out/bin/mpiCC
+rm $out/bin/mpic*
+rm $out/bin/mpif*
+rm $out/bin/ompi*
+rm $out/bin/opal_wrapper
+rm $out/bin/ortecc
+rm $out/bin/perf
+rm $out/bin/ph5diff
+
 # Copy dependencies to $out/lib and patch them
-for lib in ${libs[@]}
-do
+mkdir -p $out/lib
+for lib in ${libs[@]}; do
     name=$(basename $lib)
-    install -D $lib $out/lib/$name
-    patchelf --set-rpath "\$ORIGIN" $out/lib/$name
+    cp $lib $out/lib/$name
+done
+
+# Patch RPATH in $out/lib
+for lib in $out/lib/*; do
+    if [ ! -L "$lib" ]; then
+        patchelf --set-rpath "\$ORIGIN" "$lib"
+    fi
+done
+
+# Patch RPATH in $out/bin
+for bin in $out/bin/*; do
+    if [ ! -L "$bin" ]; then
+        patchelf --set-rpath "\$ORIGIN/../lib" "$bin"
+    fi
 done
 
 # Build
