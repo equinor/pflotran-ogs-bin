@@ -6,7 +6,7 @@
 # podman run --rm -it -v$PWD:$PWD:z -w$PWD quay.io/pypa/manylinux2014_x86_64 ./build_using_manylinux2014
 set -ex
 
-petsc_rev="v3.20.6"
+petsc_rev="v3.19.1"
 pflotran_ogs_version="1.8"
 pflotran_ogs_rev="11"
 
